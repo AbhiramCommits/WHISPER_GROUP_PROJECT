@@ -11,7 +11,7 @@ import csv
 import io
 import os
 
-TAR_PATH   = r"1774750990364-cv-corpus-25.0-2026-03-09-en.tar.gz"
+TAR_PATH   = r"common-voice-scripted-speech-25-0-englis-0c0b9a16.tar.gz"
 OUTPUT_DIR = r"cv-data"
 
 os.makedirs(os.path.join(OUTPUT_DIR, "clips"), exist_ok=True)
