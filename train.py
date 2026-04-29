@@ -21,7 +21,7 @@ tokenizer = get_tokenizer(multilingual=False)
 # Training config
 # ---------------------------------------------------------------------------
 WARMUP     = 2000
-TOTAL      = 1200000  # adjust based on how long you want to train
+TOTAL      = 1_000_000  # adjust based on how long you want to train
 BATCH_SIZE = 16
 
 # How much of each batch comes from Common Voice vs LibriSpeech.
@@ -142,6 +142,8 @@ for source, example in data_iter:
             test_mel = torch.randn(1, 80, 3000).to(device)
             enc_out  = model.encoder(test_mel)
             print(f"  Encoder std: {enc_out.std():.4f}")
+        if not os.path.isdir('checkpoints'):
+            os.mkdir('checkpoints')
         ckpt = f"checkpoints/checkpoint_{step}.pt"
         torch.save(model.state_dict(), ckpt)
         print(f"  Saved {ckpt}")
