@@ -22,6 +22,8 @@ import time
 import numpy as np
 import librosa
 import jiwer
+import torch
+import tiktoken
 
 import maccel
 
@@ -54,7 +56,7 @@ SOT_TOKEN    = 50257   # <|startoftranscript|>
 EOT_TOKEN    = 50256   # <|endoftext|>
 
 # ---------------------------------------------------------------------------
-# Self-contained audio preprocessing (no whisper package import)
+# Self-contained audio preprocessing
 # ---------------------------------------------------------------------------
 
 def pad_or_trim(array: np.ndarray, length: int) -> np.ndarray:
@@ -67,7 +69,6 @@ def pad_or_trim(array: np.ndarray, length: int) -> np.ndarray:
 
 def log_mel_spectrogram(audio: np.ndarray) -> np.ndarray:
     """Returns (80, 3000) log-mel spectrogram matching Whisper preprocessing."""
-    import torch
     audio_t = torch.from_numpy(audio).float()
     window  = torch.hann_window(N_FFT)
     stft    = torch.stft(audio_t, N_FFT, HOP_LENGTH, window=window,
@@ -105,7 +106,6 @@ def audio_to_mel(audio_path: str) -> np.ndarray:
 def load_whisper_tokenizer():
     """Load the Whisper English tokenizer via tiktoken."""
     try:
-        import tiktoken
         enc = tiktoken.get_encoding("gpt2")
         return enc
     except ImportError:
