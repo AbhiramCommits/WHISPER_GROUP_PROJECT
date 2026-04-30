@@ -45,8 +45,8 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 # ---------------------------------------------------------------------------
 # Resume from checkpoint (set to None to start from scratch)
 # ---------------------------------------------------------------------------
-RESUME_CHECKPOINT = None   # e.g. "checkpoints/checkpoint_50000.pt"
-
+RESUME_CHECKPOINT = None
+# RESUME_CHECKPOINT = "checkpoints/checkpoint_50000.pt"
 if RESUME_CHECKPOINT and os.path.isfile(RESUME_CHECKPOINT):
     model.load_state_dict(torch.load(RESUME_CHECKPOINT, map_location=device))
     step = int(os.path.splitext(os.path.basename(RESUME_CHECKPOINT))[0].split("_")[-1])
