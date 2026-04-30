@@ -44,6 +44,7 @@ python extract_cv.py
 # OR
 tar -xkzvf common-voice-scripted-speech-25-0-englis-0c0b9a16.tar.gz -C cv-data
 # The tar command is probably faster than the Python script, but both will take over a day to complete.
+# You can also extract it using File Explorer. That allows you to track the progress better.
 ```
 
 4. Begin training
