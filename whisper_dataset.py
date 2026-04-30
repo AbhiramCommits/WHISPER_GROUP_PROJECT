@@ -7,7 +7,9 @@ import os
 import csv
 import random
 from whisper.audio import log_mel_spectrogram, pad_or_trim, N_SAMPLES, SAMPLE_RATE
+from dotenv import load_dotenv
 
+load_dotenv()
 
 MAX_TOKENS = 448
 
@@ -35,7 +37,7 @@ def get_librispeech(streaming=False):
     return combined
 
 # Common Voice — load train + dev splits from disk
-def load_cv_examples(splits=("train.tsv", "dev.tsv")):
+def get_commonvoice(splits=("train.tsv", "dev.tsv")):
     """
     Returns a list of dicts: {"audio_path": ..., "text": ...}
     Only includes rows where the audio file actually exists on disk.
@@ -69,7 +71,7 @@ def spec_augment(mel):
         mel[:, t0:t0+t] = 0
     return mel
 
-def preprocess(example, tokenizer):
+def preprocess_ls(example, tokenizer):
     audio_bytes = example["audio"]["bytes"]
     if audio_bytes is None:
         raise ValueError("No audio bytes")
