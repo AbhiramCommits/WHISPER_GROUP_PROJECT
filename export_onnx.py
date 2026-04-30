@@ -92,35 +92,35 @@ print(decoder_wrapper)
 # ---------------------------------------------------------------------------
 # Export Encoder
 # ---------------------------------------------------------------------------
-# print("=" * 50)
-# print("Exporting encoder...")
+print("=" * 50)
+print("Exporting encoder...")
  
-# dummy_mel = torch.zeros(1, N_MELS, 3000)
+dummy_mel = torch.zeros(1, N_MELS, 3000)
  
-# torch.onnx.export(
-#     encoder_wrapper,
-#     dummy_mel,
-#     ENCODER_PATH,
-#     opset_version=OPSET,
-#     input_names=["mel"],
-#     output_names=["audio_features"],
-#     dynamic_axes={
-#         "mel":            {0: "batch"},
-#         "audio_features": {0: "batch"},
-#     },
-#     do_constant_folding=True,
-#     verbose=False,
-#     external_data=False,
-# )
-# print(f"Saved: {ENCODER_PATH}")
+torch.onnx.export(
+    encoder_wrapper,
+    dummy_mel,
+    ENCODER_PATH,
+    opset_version=OPSET,
+    input_names=["mel"],
+    output_names=["audio_features"],
+    dynamic_axes={
+        "mel":            {0: "batch"},
+        "audio_features": {0: "batch"},
+    },
+    do_constant_folding=True,
+    verbose=False,
+    external_data=False,
+)
+print(f"Saved: {ENCODER_PATH}")
  
-# print("Verifying encoder...")
-# onnx.checker.check_model(onnx.load(ENCODER_PATH))
-# enc_session = ort.InferenceSession(ENCODER_PATH, providers=["CPUExecutionProvider"])
-# enc_out = enc_session.run(None, {"mel": dummy_mel.numpy()})[0]
-# print(f"  Output shape: {enc_out.shape}")
-# assert enc_out.shape == (1, N_AUDIO_CTX, N_STATE), f"Bad shape: {enc_out.shape}"
-# print("  Encoder OK.\n")
+print("Verifying encoder...")
+onnx.checker.check_model(onnx.load(ENCODER_PATH))
+enc_session = ort.InferenceSession(ENCODER_PATH, providers=["CPUExecutionProvider"])
+enc_out = enc_session.run(None, {"mel": dummy_mel.numpy()})[0]
+print(f"  Output shape: {enc_out.shape}")
+assert enc_out.shape == (1, N_AUDIO_CTX, N_STATE), f"Bad shape: {enc_out.shape}"
+print("  Encoder OK.\n")
  
 # ---------------------------------------------------------------------------
 # Export Decoder — fixed seq_len=1 for NPU (Aries2) compatibility.
