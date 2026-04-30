@@ -1,0 +1,4 @@
+.venv
+*.tar.gz
+cv-data/
+cv-test/
