@@ -22,6 +22,9 @@ source .venv/bin/activate # Unix
 
 # Install packages
 pip install -r requirements.txt
+
+# Recommended to install torch after
+pip3 install torch --index-url https://download.pytorch.org/whl/cu130
 ```
 
 2. Create `.env` file
