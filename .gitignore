@@ -2,3 +2,5 @@
 *.tar.gz
 cv-data/
 cv-test/
+.env
+__pycache__/
