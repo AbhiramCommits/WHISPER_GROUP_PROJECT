@@ -8,18 +8,13 @@ import csv
 import random
 from whisper.audio import log_mel_spectrogram, pad_or_trim, N_SAMPLES, SAMPLE_RATE
 
-# Must match n_text_ctx in my_model_config.py — any example whose token
-# sequence (including sot + eot) exceeds this is skipped during preprocessing
+
 MAX_TOKENS = 448
 
-# ---------------------------------------------------------------------------
 # Path to extracted Common Voice data folder (output of extract_cv.py)
-# ---------------------------------------------------------------------------
 CV_DATA_ROOT = r"cv-data"
 
-# ---------------------------------------------------------------------------
 # LibriSpeech — same as before
-# ---------------------------------------------------------------------------
 def get_librispeech(streaming=False):
     libri_100   = load_dataset("openslr/librispeech_asr", "clean",
                                split="train.100", streaming=streaming)
@@ -39,9 +34,7 @@ def get_librispeech(streaming=False):
     )
     return combined
 
-# ---------------------------------------------------------------------------
 # Common Voice — load train + dev splits from disk
-# ---------------------------------------------------------------------------
 def load_cv_examples(splits=("train.tsv", "dev.tsv")):
     """
     Returns a list of dicts: {"audio_path": ..., "text": ...}
@@ -64,9 +57,7 @@ def load_cv_examples(splits=("train.tsv", "dev.tsv")):
     print(f"  Loaded {len(examples)} Common Voice examples from {splits}")
     return examples
 
-# ---------------------------------------------------------------------------
 # SpecAugment
-# ---------------------------------------------------------------------------
 def spec_augment(mel):
     for _ in range(2):
         f  = torch.randint(0, 15, (1,)).item()
@@ -78,9 +69,6 @@ def spec_augment(mel):
         mel[:, t0:t0+t] = 0
     return mel
 
-# ---------------------------------------------------------------------------
-# Preprocess — LibriSpeech example (bytes-based, same as before)
-# ---------------------------------------------------------------------------
 def preprocess(example, tokenizer):
     audio_bytes = example["audio"]["bytes"]
     if audio_bytes is None:
@@ -111,9 +99,7 @@ def preprocess(example, tokenizer):
         raise ValueError(f"Token sequence too long: {len(tokens)} > {MAX_TOKENS}")
     return mel, torch.tensor(tokens, dtype=torch.long)
 
-# ---------------------------------------------------------------------------
 # Preprocess — Common Voice example (file path based, MP3)
-# ---------------------------------------------------------------------------
 def preprocess_cv(example, tokenizer):
     array, sr = librosa.load(example["audio_path"], sr=None, mono=True)
     array = array.astype("float32")
@@ -142,12 +128,8 @@ def preprocess_cv(example, tokenizer):
         raise ValueError(f"Token sequence too long: {len(tokens)} > {MAX_TOKENS}")
     return mel, torch.tensor(tokens, dtype=torch.long)
 
-# ---------------------------------------------------------------------------
 # Mixed iterator: yields examples from LibriSpeech and Common Voice
 # interleaved at a configurable ratio.
-# CV_RATIO = 0.5 means 50% of batches come from Common Voice.
-# This is high because CV matches your test distribution.
-# ---------------------------------------------------------------------------
 def mixed_epoch_iter(librispeech_ds, cv_examples, cv_ratio=0.5):
     """
     Each epoch:
