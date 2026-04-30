@@ -26,9 +26,9 @@ from whisper.tokenizer import get_tokenizer
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
-CHECKPOINT   = "checkpoint_922000.pt"
+CHECKPOINT   = os.path.join("checkpoints", "checkpoint_922000.pt")
 ENCODER_PATH = "whisper_encoder.onnx"
-DECODER_PATH = "whisper_decoder_rank3.onnx"
+DECODER_PATH = "whisper_decoder.onnx"
 OPSET        = 18   # use 18 — torch will upgrade anyway, cleaner to be explicit
  
 N_MELS      = 80
