@@ -20,25 +20,19 @@ import torch.nn as nn
 import onnx
 import onnxruntime as ort
 import numpy as np
-from my_model_config import get_model
+from my_model_config_rope import get_model
 from whisper.tokenizer import get_tokenizer
  
-# ---------------------------------------------------------------------------
-# CONFIG
-# ---------------------------------------------------------------------------
 CHECKPOINT   = os.path.join("checkpoints", "checkpoint_922000.pt")
 ENCODER_PATH = "whisper_encoder.onnx"
 DECODER_PATH = "whisper_decoder.onnx"
-OPSET        = 18   # use 18 — torch will upgrade anyway, cleaner to be explicit
+OPSET = 18
  
-N_MELS      = 80
+N_MELS = 80
 N_AUDIO_CTX = 1500
-N_STATE     = 384
-N_VOCAB     = 51865
+N_STATE = 384
+N_VOCAB = 51865
  
-# ---------------------------------------------------------------------------
-# Load checkpoint
-# ---------------------------------------------------------------------------
 device = "cpu"
 print(f"Loading checkpoint: {CHECKPOINT}")
 model = get_model().to(device)
@@ -46,10 +40,10 @@ model = get_model().to(device)
 checkpoint = torch.load(CHECKPOINT, map_location=device)
 missing, unexpected = model.load_state_dict(checkpoint, strict=False)
  
-expected_missing    = {"decoder.output_projection.weight"}
+expected_missing = {"decoder.output_projection.weight"}
 expected_unexpected = {k for k in unexpected if k.endswith(".bias")}
-real_missing        = [k for k in missing    if k not in expected_missing]
-real_unexpected     = [k for k in unexpected if k not in expected_unexpected]
+real_missing = [k for k in missing if k not in expected_missing]
+real_unexpected = [k for k in unexpected if k not in expected_unexpected]
  
 if real_missing:
     print(f"WARNING — unexpected missing keys: {real_missing}")
@@ -63,10 +57,7 @@ print("Model ready.\n")
  
 tokenizer = get_tokenizer(multilingual=False)
  
-# ---------------------------------------------------------------------------
-# Wrappers
-# ---------------------------------------------------------------------------
- 
+# WRAPPERS
 class EncoderWrapper(nn.Module):
     def __init__(self, encoder):
         super().__init__()
@@ -89,9 +80,7 @@ encoder_wrapper = EncoderWrapper(model.encoder).eval()
 decoder_wrapper = DecoderWrapper(model.decoder).eval()
 print(decoder_wrapper)
  
-# ---------------------------------------------------------------------------
-# Export Encoder
-# ---------------------------------------------------------------------------
+# ENCODER
 print("=" * 50)
 print("Exporting encoder...")
  
@@ -105,7 +94,7 @@ torch.onnx.export(
     input_names=["mel"],
     output_names=["audio_features"],
     dynamic_axes={
-        "mel":            {0: "batch"},
+        "mel": {0: "batch"},
         "audio_features": {0: "batch"},
     },
     do_constant_folding=True,
@@ -122,19 +111,11 @@ print(f"  Output shape: {enc_out.shape}")
 assert enc_out.shape == (1, N_AUDIO_CTX, N_STATE), f"Bad shape: {enc_out.shape}"
 print("  Encoder OK.\n")
  
-# ---------------------------------------------------------------------------
-# Export Decoder — fixed seq_len=1 for NPU (Aries2) compatibility.
-#
-# Dynamic seq_len causes qubee to produce width=-1 in Adding layers which
-# the Aries2 backend cannot handle. Since we do greedy decoding one token
-# at a time on the NPU, seq_len=1 is all we need at inference time.
-# The full token history is tracked in Python; only the latest token is
-# fed to the decoder each step.
-# ---------------------------------------------------------------------------
+# DECODER
 print("=" * 50)
 print("Exporting decoder (fixed seq_len=1 for NPU)...")
  
-dummy_tokens   = torch.tensor([[[tokenizer.sot]]], dtype=torch.int64)  # (1, 1)
+dummy_tokens = torch.tensor([[[tokenizer.sot]]], dtype=torch.int64)  # (1, 1, 1)
 dummy_features = torch.from_numpy(enc_out)                          # (1, 1500, 384)
  
 torch.onnx.export(
@@ -147,7 +128,7 @@ torch.onnx.export(
     dynamic_axes={
         # batch is still dynamic, but seq_len is fixed at 1
         "audio_features": {0: "batch"},
-        "logits":         {0: "batch"},
+        "logits": {0: "batch"},
     },
     do_constant_folding=True,
     verbose=False,
@@ -162,7 +143,7 @@ dec_session = ort.InferenceSession(DECODER_PATH, providers=["CPUExecutionProvide
 dec_out_1 = dec_session.run(
     None,
     {
-        "tokens":         np.array([[[tokenizer.sot]]], dtype=np.int64),
+        "tokens": np.array([[[tokenizer.sot]]], dtype=np.int64),
         "audio_features": dummy_features.numpy(),
     }
 )[0]
@@ -170,9 +151,7 @@ print(f"  Output shape (seq=1): {dec_out_1.shape}")
 assert dec_out_1.shape == (1, 1, N_VOCAB)
 print("  Decoder OK.\n")
  
-# ---------------------------------------------------------------------------
-# Greedy decode comparison: PyTorch vs ONNX
-# ---------------------------------------------------------------------------
+# Comparing greedy decode between PyTorch and ONNX
 print("=" * 50)
 print("Greedy decode comparison (PyTorch vs ONNX)...")
  
@@ -183,9 +162,9 @@ with torch.no_grad():
     pt_features = model.encoder(test_mel)
     pt_tokens   = [tokenizer.sot]
     for _ in range(20):
-        tok_t     = torch.tensor([pt_tokens], dtype=torch.long)
+        tok_t = torch.tensor([pt_tokens], dtype=torch.long)
         pt_logits = model.decoder(tok_t, pt_features)
-        next_tok  = pt_logits[0, -1].argmax().item()
+        next_tok = pt_logits[0, -1].argmax().item()
         if next_tok == tokenizer.eot:
             break
         pt_tokens.append(next_tok)
@@ -196,7 +175,7 @@ onnx_tokens = [tokenizer.sot]
 for _ in range(20):
     # Feed only the most recent token — decoder is stateless so we track
     # position implicitly via the growing token list in Python
-    last_tok    = np.array([[[onnx_tokens[-1]]]], dtype=np.int64)  # (1, 1)
+    last_tok = np.array([[[onnx_tokens[-1]]]], dtype=np.int64)  # (1, 1, 1)
     onnx_logits = dec_session.run(
         None, {"tokens": last_tok, "audio_features": onnx_feats}
     )[0]
