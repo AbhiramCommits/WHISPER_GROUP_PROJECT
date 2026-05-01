@@ -4,3 +4,8 @@ cv-data/
 cv-test/
 .env
 __pycache__/
+checkpoints/
+*.pt
+*.pth
+*.onnx
+*.mxq
