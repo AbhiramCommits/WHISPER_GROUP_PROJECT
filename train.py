@@ -44,7 +44,7 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 RESUME_CHECKPOINT = None
 # Uncomment to continue from checkpoint
-# RESUME_CHECKPOINT = os.path.join("checkpoints", "checkpoint_50000.pt")
+# RESUME_CHECKPOINT = os.path.join("checkpoint_922000.pt")
 
 if RESUME_CHECKPOINT and os.path.isfile(RESUME_CHECKPOINT):
     model.load_state_dict(torch.load(RESUME_CHECKPOINT, map_location=device))
@@ -61,7 +61,7 @@ librispeech = get_librispeech(streaming=False)
 print(f"  LibriSpeech: {len(librispeech)} examples")
 
 print("Loading Common Voice...")
-cv_examples = get_commonvoice(splits=("train.tsv", "dev.tsv"))
+cv_examples = get_commonvoice()
 print(f"  Common Voice: {len(cv_examples)} examples")
 
 print(f"\nMix ratio: {int((1-CV_RATIO)*100)}% LibriSpeech / {int(CV_RATIO*100)}% Common Voice")
