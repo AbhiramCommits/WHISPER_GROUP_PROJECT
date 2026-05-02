@@ -1,8 +1,5 @@
-# onnx to mxq — Whisper Encoder + Decoder
-# Uses qubee 0.12.0 (aries2) API
-#
-# Run from the mxq_compile folder:
-#   python onnx_to_mxq.py
+# onnx_to_mxq.py — Whisper Encoder + Decoder
+# Run: python onnx_to_mxq.py
 
 import os
 import shutil
@@ -14,7 +11,7 @@ from qubee import mxq_compile
 from qubee.calibration.utils_calib import list_np_files_in_txt
 
 # ---------------------------------------------------------------------------
-# Whisper audio constants
+# Audio constants
 # ---------------------------------------------------------------------------
 SAMPLE_RATE = 16000
 N_FFT       = 400
@@ -57,8 +54,8 @@ def audio_to_mel(audio_path: str) -> np.ndarray:
     if sr != SAMPLE_RATE:
         array = librosa.resample(array, orig_sr=sr, target_sr=SAMPLE_RATE)
     array = pad_or_trim(array, N_SAMPLES)
-    mel   = log_mel_spectrogram(array)       # (80, 3000)
-    return mel[np.newaxis, :, :]             # (1, 80, 3000)
+    mel   = log_mel_spectrogram(array)
+    return mel[np.newaxis, :, :]  # (1, 80, 3000)
 
 # ---------------------------------------------------------------------------
 # CONFIG
@@ -111,15 +108,14 @@ if os.path.exists(ENC_CALIB_NPY):
 os.makedirs(ENC_CALIB_NPY)
 
 for i, audio_path in enumerate(audio_files):
-    mel  = audio_to_mel(audio_path)              # (1, 80, 3000)
-    # Add the extra H=1 dimension for qubee's internal NHWC layout
-    mel_nhwc = mel[np.newaxis, :, :, :]          # (1, 1, 80, 3000)
+    mel = audio_to_mel(audio_path)               # (1, 80, 3000)
+    mel_nhwc = mel[np.newaxis, :, :, :]          # (1, 1, 80, 3000) for qubee
     stem = os.path.splitext(os.path.basename(audio_path))[0]
     np.save(os.path.join(ENC_CALIB_NPY, f"{stem}.npy"), mel_nhwc)
     if (i + 1) % 50 == 0:
         print(f"  {i + 1}/{len(audio_files)} npy files saved...")
 
-print(f"  Saved {len(audio_files)} npy files → shape (1, 1, 80, 3000) [NHWC]")
+print(f"  Saved {len(audio_files)} npy files → shape (1, 1, 80, 3000)")
 list_np_files_in_txt(ENC_CALIB_NPY, ENC_CALIB_TXT)
 print(f"  Manifest: {ENC_CALIB_TXT}")
 
@@ -128,7 +124,6 @@ mxq_compile(
     model=os.path.abspath(ENCODER_ONNX),
     calib_data_path=ENC_CALIB_TXT,
     feed_dict={
-        # Must match ONNX model input shape — NOT the NHWC internal shape
         "mel": np.zeros((1, N_MELS, 3000), dtype=np.float32),
     },
     backend="onnx",
@@ -140,7 +135,18 @@ mxq_compile(
 print(f"Saved: {ENCODER_MXQ}\n")
 
 # ---------------------------------------------------------------------------
-# DECODER calibration — multi-input folder structure
+# DECODER calibration
+#
+# KEY FIX: tokens shape fixed at (1, 1) — one token ID per decode step.
+#
+# Previous compilations were broken:
+#   - dynamic_axes: Aries2 NPU does not support dynamic shapes →
+#     Model_ShapeMismatched on every call
+#   - shape (1, 1, 384): treated token as embedding vector instead of
+#     integer ID → decoder output garbage ("sher sher", "at at at")
+#
+# This uses (1, 1) fixed token shape with use_random_calib=True so
+# qubee uses the feed_dict shapes directly without needing sample folders.
 # ---------------------------------------------------------------------------
 print("=" * 55)
 print("DECODER: building calibration data...")
@@ -169,12 +175,12 @@ mxq_compile(
     model=os.path.abspath(DECODER_ONNX),
     calib_data_path="",          # unused when use_random_calib=True
     feed_dict={
-        "tokens":         np.array([[[SOT_TOKEN]]], dtype=np.int64),   # (1, 1, 1) fixed seq_len
+        "tokens":         np.array([[[SOT_TOKEN]]], dtype=np.int64),  # (1, 1, 1) fixed
         "audio_features": np.zeros((1, N_AUDIO_CTX, N_STATE), dtype=np.float32),
     },
     backend="onnx",
     save_path=os.path.abspath(DECODER_MXQ),
-    use_random_calib=True,       # bypass sample_N folder — qubee uses feed_dict shapes
+    use_random_calib=True,   # uses feed_dict shapes directly
     cpu_offload=True,
     optimize_option=0,
 )
