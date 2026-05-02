@@ -20,7 +20,7 @@ import torch.nn as nn
 import onnx
 import onnxruntime as ort
 import numpy as np
-from my_model_config_rope import get_model
+from my_model_config import get_model
 from whisper.tokenizer import get_tokenizer
  
 CHECKPOINT   = os.path.join("checkpoints", "checkpoint_922000.pt")
