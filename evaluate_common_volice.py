@@ -1,6 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import time
 import csv
 import torch
 import jiwer
@@ -15,12 +16,13 @@ from tqdm.auto import tqdm
 # CONFIGURE THESE before running
 # ---------------------------------------------------------------------------
 
-CV_ROOT    = r"cv-data"
+CV_ROOT    = r"cv-test"
 CHECKPOINT = os.path.join("checkpoint_922000.pt")
 
 # Repetition penalty — how much to penalise tokens already generated.
 # 0.0 = no penalty (old behaviour), 1.0 = strong penalty. Start at 0.5.
 REPETITION_PENALTY = 0.5
+SEC_TO_MS = 1000
 
 # ---------------------------------------------------------------------------
 
@@ -77,6 +79,9 @@ print("Running evaluation...\n")
 references = []
 hypotheses = []
 
+total_encoder_time = 0.0
+total_decoder_time = 0.0
+
 with torch.no_grad():
     for i, (audio_path, sentence) in enumerate(all_rows):
         try:
@@ -93,13 +98,20 @@ with torch.no_grad():
                 pad_or_trim(torch.tensor(array), N_SAMPLES)
             ).unsqueeze(0).to(device)
 
+            start_encoder = time.perf_counter()
             audio_features = model.encoder(mel)
+            encoder_latency = time.perf_counter() - start_encoder
+            encoder_latency_ms = encoder_latency * SEC_TO_MS
+            total_encoder_time += encoder_latency_ms
+            
 
             # FIX 1: start with full sot_sequence instead of bare [sot]
             # This gives the decoder [sot, lang_token, task_token, no_timestamps]
             # which is what it was pre-trained to expect before any output tokens
             tokens = list(tokenizer.sot_sequence)
 
+            start_decoder = time.perf_counter()
+            # predicted_ids = model.generate(encoder_outputs=audio_features)
             for _ in range(200):
                 token_tensor = torch.tensor([tokens], dtype=torch.long, device=device)
                 logits = model.decoder(token_tensor, audio_features)
@@ -114,6 +126,9 @@ with torch.no_grad():
                 if next_token == tokenizer.eot:
                     break
                 tokens.append(next_token)
+            decoder_latency = time.perf_counter() - start_decoder
+            decoder_latency_ms = decoder_latency * SEC_TO_MS
+            total_decoder_time += decoder_latency_ms
 
             # Strip the sot_sequence prefix before decoding to text
             predicted = normalise(tokenizer.decode(tokens[len(tokenizer.sot_sequence):]))
@@ -128,6 +143,7 @@ with torch.no_grad():
             if i % 50 == 0:
                 print(f"[{i}/{len(all_rows)}] REF: {reference}")
                 print(f"[{i}/{len(all_rows)}] HYP: {predicted}")
+                print(f"Latency -> Enc: {encoder_latency_ms:.3f}ms | Dec: {decoder_latency_ms:.3f}ms")
                 print()
 
         except Exception as e:
@@ -139,6 +155,12 @@ if not references:
 else:
     wer = jiwer.wer(references, hypotheses)
     cer = jiwer.cer(references, hypotheses)
+
+    total_time = total_encoder_time + total_decoder_time
+    avg_enc_time = total_encoder_time / len(references)
+    avg_dec_time = total_decoder_time / len(references)
+    avg_total_time = total_time / len(references)
+
     print(f"\n{'='*40}")
     print(f"Checkpoint    : {CHECKPOINT}")
     print(f"Dataset       : Common Voice Scripted Speech 25.0 / test")
@@ -146,4 +168,8 @@ else:
     print(f"Total examples: {len(references)}")
     print(f"WER : {wer * 100:.2f}%")
     print(f"CER : {cer * 100:.2f}%")
+    print(f"\nLatency Profile (per sample):")
+    print(f"  Avg Encoder Time : {avg_enc_time}ms")
+    print(f"  Avg Decoder Time : {avg_dec_time}ms")
+    print(f"  Avg Total Time   : {avg_total_time}ms")
     print(f"{'='*40}")
