@@ -11,35 +11,23 @@ import torch.nn.functional as F
 from whisper.model import ModelDimensions
 
 
-# ---------------------------------------------------------------------------
-# RoPE helpers
-# ---------------------------------------------------------------------------
 
+## helpers
 def precompute_rope_freqs(dim: int, max_seq_len: int, base: float = 10000.0):
-    half = dim // 2
-    theta = 1.0 / (base ** (torch.arange(0, half, dtype=torch.float32) / half))
+    theta = 1.0 / (base ** (torch.arange(0, dim // 2, dtype=torch.float32) / (dim // 2)))
     positions = torch.arange(max_seq_len, dtype=torch.float32)
     freqs = torch.outer(positions, theta)
     return freqs.cos(), freqs.sin()
 
 
 def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor):
-    """
-    x:   (batch, heads, seq, head_dim)
-    cos/sin: (seq, head_dim//2)
-    """
-    seq = x.shape[2]
-    cos = cos[:seq].unsqueeze(0).unsqueeze(0)
-    sin = sin[:seq].unsqueeze(0).unsqueeze(0)
-    half = x.shape[-1] // 2
-    x1, x2 = x[..., :half], x[..., half:]
+    cos = cos[:x.shape[2]].unsqueeze(0).unsqueeze(0)
+    sin = sin[:x.shape[2]].unsqueeze(0).unsqueeze(0)
+    x1, x2 = x[..., :x.shape[-1] // 2], x[..., x.shape[-1] // 2:]
     return torch.cat([x1 * cos - x2 * sin,
                       x1 * sin + x2 * cos], dim=-1)
 
 
-# ---------------------------------------------------------------------------
-# Multi-head attention with RoPE + FlashAttention
-# ---------------------------------------------------------------------------
 
 class RoPEMultiHeadAttention(nn.Module):
     def __init__(self, n_state: int, n_head: int, max_seq_len: int = 1500):
@@ -58,14 +46,9 @@ class RoPEMultiHeadAttention(nn.Module):
         self.register_buffer("rope_sin", sin, persistent=False)
 
     def forward(self, x, xa=None, mask=None, kv_cache=None):
-        """
-        x:    (batch, seq_q, n_state)   — query source
-        xa:   (batch, seq_kv, n_state)  — key/value source for cross-attention
-        mask: causal mask or None
-        """
+
         is_cross = xa is not None
         kv_src = xa if is_cross else x
-
         q = self.query(x)
         k = self.key(kv_src)
         v = self.value(kv_src)
@@ -78,27 +61,24 @@ class RoPEMultiHeadAttention(nn.Module):
                 v = torch.cat([kv_cache[vid], v], dim=1)
             kv_cache[kid] = k
             kv_cache[vid] = v
-
-        b, sq, _ = q.shape
         sk = k.shape[1]
-
+        b, sq, _ = q.shape
+        
         q = q.view(b, sq, self.n_head, self.head_dim).transpose(1, 2)
         k = k.view(b, sk, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(b, sk, self.n_head, self.head_dim).transpose(1, 2)
 
-        # Apply RoPE only to self-attention (not cross-attention)
+    # Apply RoPE only to self-attention (not cross-attention)
         if not is_cross:
             q = apply_rope(q, self.rope_cos, self.rope_sin)
             k = apply_rope(k, self.rope_cos, self.rope_sin)
 
-        # FlashAttention via PyTorch SDPA
-        # is_causal=True only when sq==sk (self-attention, not cross-attention)
-        use_causal = (not is_cross) and (mask is not None)
+        # FlashAttention with PyTorch SDPA
         out = F.scaled_dot_product_attention(
             q, k, v,
             attn_mask=None,
             dropout_p=0.0,
-            is_causal=use_causal,
+            is_causal=(not is_cross) and (mask is not None)
         )
 
         out = out.transpose(1, 2).contiguous().view(b, sq, self.n_state)
@@ -110,23 +90,23 @@ class RoPEMultiHeadAttention(nn.Module):
 # ---------------------------------------------------------------------------
 
 class RoPEResidualAttentionBlock(nn.Module):
-    def __init__(self, n_state, n_head, cross_attention=False, max_seq_len=1500):
+    def __init__(self, num_state, n_head, cross_attention, max_seq_len=1500):
         super().__init__()
-        self.attn    = RoPEMultiHeadAttention(n_state, n_head, max_seq_len)
-        self.attn_ln = nn.LayerNorm(n_state)
+        self.attn    = RoPEMultiHeadAttention(num_state, n_head, max_seq_len)
+        self.attn_ln = nn.LayerNorm(num_state)
 
-        self.cross_attn    = None
-        self.cross_attn_ln = None
+        self.cross_attn    = ''
+        self.cross_attn_ln = ''
         if cross_attention:
-            self.cross_attn    = RoPEMultiHeadAttention(n_state, n_head, max_seq_len)
-            self.cross_attn_ln = nn.LayerNorm(n_state)
+            self.cross_attn    = RoPEMultiHeadAttention(num_state, n_head, max_seq_len)
+            self.cross_attn_ln = nn.LayerNorm(num_state)
 
         self.mlp = nn.Sequential(
-            nn.Linear(n_state, n_state * 4),
-            nn.ReLU(),   # ReLU instead of GELU — Aries2 NPU does not support Erf
-            nn.Linear(n_state * 4, n_state),
+            nn.Linear(num_state, num_state * 4),
+            nn.ReLU(),   
+            nn.Linear(num_state * 4, num_state),
         )
-        self.mlp_ln = nn.LayerNorm(n_state)
+        self.mlp_ln = nn.LayerNorm(num_state)
 
     def forward(self, x, xa=None, mask=None, kv_cache=None):
         x = x + self.attn(self.attn_ln(x), mask=mask, kv_cache=kv_cache)[0]
@@ -146,7 +126,6 @@ class RoPEAudioEncoder(nn.Module):
         self.conv1 = nn.Conv1d(n_mels, n_state, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(n_state, n_state, kernel_size=3, stride=2, padding=1)
 
-        # Learned positional embedding (RoPE handles relative positions in attention)
         self.positional_embedding = nn.Parameter(torch.zeros(n_ctx, n_state))
         nn.init.normal_(self.positional_embedding, std=0.02)
 
@@ -159,10 +138,9 @@ class RoPEAudioEncoder(nn.Module):
         self.ln_post = nn.LayerNorm(n_state)
 
     def forward(self, x):
-        # x: (batch, n_mels, time)
-        x = F.relu(self.conv1(x))   # ReLU instead of GELU — Aries2 NPU does not support Erf
+        x = F.relu(self.conv1(x))   
         x = F.relu(self.conv2(x))
-        x = x.permute(0, 2, 1)                         # (batch, time, n_state)
+        x = x.permute(0, 2, 1)                        
         assert x.shape[1] <= self.positional_embedding.shape[0], (
             f"Audio sequence length {x.shape[1]} exceeds "
             f"n_audio_ctx {self.positional_embedding.shape[0]}"
@@ -170,7 +148,7 @@ class RoPEAudioEncoder(nn.Module):
         x = x + self.positional_embedding[:x.shape[1]]
         for block in self.blocks:
             x = block(x)
-        return self.ln_post(x)                          # (batch, time, n_state)
+        return self.ln_post(x)                          
 
 
 # ---------------------------------------------------------------------------
